@@ -7,6 +7,7 @@ import (
 	"github.com/codera/battle/combat"
 	"github.com/codera/battle/dragon"
 	"github.com/codera/battle/internal"
+	"github.com/codera/battle/hero/funktionskrieger"
 )
 
 func main() {
@@ -28,7 +29,7 @@ func main() {
 	fmt.Printf("\nDer %s mit %d HP erwartet euch!\n", entropyDragon.GetName(), entropyDragon.GetMaxHP())
 	fmt.Printf("Eure Gruppe: ")
 	for i, h := range helden {
-		if i > 0 {
+		if i > 0 {	
 			fmt.Print(", ")
 		}
 		fmt.Print(h.GetName())
@@ -44,7 +45,7 @@ func placeholderHeroes() []internal.Combatant {
 		placeholderHero("<DEIN_NAME> (Arkan-Dokumentar*in)", 120, 18, 8, 14),
 		placeholderHero("<DEIN_NAME> (Daten-Druide)", 100, 14, 10, 16),
 		placeholderHero("<DEIN_NAME> (Code-Kleriker*in)", 110, 10, 12, 12),
-		placeholderHero("<DEIN_NAME> (Funktions-Krieger*in)", 150, 22, 14, 8),
+		funktionskrieger.New("Onni Johansson"),
 		placeholderHero("<DEIN_NAME> (Runenschmied*in)", 130, 16, 16, 10),
 	}
 }
