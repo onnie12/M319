@@ -8,6 +8,7 @@ import (
 	"github.com/codera/battle/dragon"
 	"github.com/codera/battle/internal"
 	"github.com/codera/battle/hero/funktionskrieger"
+	"github.com/codera/battle/hero/rogue"
 )
 
 func main() {
@@ -46,7 +47,7 @@ func placeholderHeroes() []internal.Combatant {
 		placeholderHero("<DEIN_NAME> (Daten-Druide)", 100, 14, 10, 16),
 		placeholderHero("<DEIN_NAME> (Code-Kleriker*in)", 110, 10, 12, 12),
 		funktionskrieger.New("Onni Johansson"),
-		placeholderHero("<DEIN_NAME> (Runenschmied*in)", 130, 16, 16, 10),
+		rogue.New("Luca Witkowski"),
 	}
 }
 
