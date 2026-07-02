@@ -1,5 +1,14 @@
 // Package rogue implements the System-Infiltrator (Rogue) hero
 // for the Codera battle against the Entropy Dragon.
+//
+// This package conforms to internal.HeroController. The pattern:
+//
+//   - DefaultLoadout(name) returns the canonical seed data for this role.
+//   - New(internal.Loadout) builds the hero from DB-sourced data.
+//   - Skills / Execute / AutoAction / EndRound satisfy the contract so combat
+//     can drive the hero without importing this package.
+//
+// The role owner edits ONLY this file — no other hero package, and not combat.
 package rogue
 
 import (
@@ -9,164 +18,105 @@ import (
 	"github.com/codera/battle/internal"
 )
 
-// EquipmentType defines the slot an equipment item occupies.
-type EquipmentType string
-
+// Base stats of the System-Infiltrator before equipment bonuses.
 const (
-	// Weapon represents a weapon slot.
-	Weapon EquipmentType = "weapon"
-	// Armor represents an armor slot.
-	Armor EquipmentType = "armor"
-	// Accessory represents an accessory slot.
-	Accessory EquipmentType = "accessory"
+	baseMaxHP   = 120
+	baseAttack  = 30
+	baseDefense = 10
+	baseSpeed   = 20
 )
 
-// TargetType defines who a skill can target.
-type TargetType string
-
-const (
-	// SingleEnemy targets a single enemy.
-	SingleEnemy TargetType = "single_enemy"
-	// Self targets the hero themselves.
-	Self TargetType = "self"
-)
-
-// Equipment represents a piece of gear that provides stat bonuses to the hero.
-type Equipment struct {
-	// Name is the display name of the equipment.
-	Name string
-	// Type is the slot this equipment occupies (weapon, armor, accessory).
-	Type EquipmentType
-	// AttackBonus is added to the hero's Attack stat.
-	AttackBonus int
-	// DefenseBonus is added to the hero's Defense stat.
-	DefenseBonus int
-	// SpeedBonus is added to the hero's Speed stat.
-	SpeedBonus int
-	// HPBonus is added to the hero's MaxHP.
-	HPBonus int
-	// SpecialEffect describes any passive effect (empty string if none).
-	SpecialEffect string
-}
-
-// Skill represents a combat ability of the System-Infiltrator.
-type Skill struct {
-	// Name is the display name of the skill.
-	Name string
-	// DamageMin is the minimum base damage dealt.
-	DamageMin int
-	// DamageMax is the maximum base damage dealt.
-	DamageMax int
-	// Healing is the amount healed (0 if the skill deals damage).
-	Healing int
-	// Accuracy is the hit chance between 0.0 and 1.0.
-	Accuracy float64
-	// TargetType defines who the skill can target.
-	TargetType TargetType
-	// Description briefly explains the skill's effect.
-	Description string
-}
-
-// Gear holds the three equipment items worn by the System-Infiltrator.
-var Gear = [3]Equipment{
-	{
-		Name:          "Schatten-Dolch",
-		Type:          Weapon,
-		AttackBonus:   14,
-		SpecialEffect: "life_steal (10% des Schadens als Heilung)",
-	},
-	{
-		Name:         "Infiltrator-Cape",
-		Type:         Armor,
-		DefenseBonus: 5,
-	},
-	{
-		Name:       "Amulett der Verwundbarkeit",
-		Type:       Accessory,
-		SpeedBonus: 5,
-		HPBonus:    25,
-	},
-}
-
-// Skills holds all three combat abilities of the System-Infiltrator.
-var Skills = [3]Skill{
-	{
-		Name:        "Hinterhalt",
-		DamageMin:   22,
-		DamageMax:   40,
-		Accuracy:    0.80,
-		TargetType:  SingleEnemy,
-		Description: "Hoher Schaden, mittlere Genauigkeit",
-	},
-	{
-		Name:        "Schwachstelle analysieren",
-		Accuracy:    1.0,
-		TargetType:  SingleEnemy,
-		Description: "Senkt die Defense des Drachens um 5 für 2 Runden",
-	},
-	{
-		Name:        "Tödliche Präzision",
-		DamageMin:   18,
-		DamageMax:   34,
-		Accuracy:    0.90,
-		TargetType:  SingleEnemy,
-		Description: "Wenn der Drache unter 25% HP: doppelter Schaden",
-	},
+// DefaultLoadout returns the canonical System-Infiltrator loadout for the given
+// learner name. The combat game receives this from the database at runtime;
+// this function is the single source of truth the DB seed mirrors.
+func DefaultLoadout(name string) internal.Loadout {
+	return internal.Loadout{
+		Name: name,
+		Role: "infiltrator",
+		BaseStats: internal.Stats{
+			MaxHP:   baseMaxHP,
+			Attack:  baseAttack,
+			Defense: baseDefense,
+			Speed:   baseSpeed,
+		},
+		Equipment: []internal.Equipment{
+			{Name: "Schatten-Dolch", Type: "weapon", AttackBonus: 14, SpecialEffect: "life_steal (10% des Schadens als Heilung)"},
+			{Name: "Infiltrator-Cape", Type: "armor", DefenseBonus: 5},
+			{Name: "Amulett der Verwundbarkeit", Type: "accessory", SpeedBonus: 5, HPBonus: 25},
+		},
+		Skills: []internal.Skill{
+			{
+				Name:        "Hinterhalt",
+				DamageMin:   22,
+				DamageMax:   40,
+				Accuracy:    0.80,
+				Target:      internal.SingleEnemy,
+				Description: "Hoher Schaden, mittlere Genauigkeit",
+			},
+			{
+				Name:        "Schwachstelle analysieren",
+				Accuracy:    1.0,
+				Target:      internal.SingleEnemy,
+				Description: "Senkt die Defense des Drachens um 5 für 2 Runden",
+			},
+			{
+				Name:        "Tödliche Präzision",
+				DamageMin:   18,
+				DamageMax:   34,
+				Accuracy:    0.90,
+				Target:      internal.SingleEnemy,
+				Description: "Wenn der Drache unter 25% HP: doppelter Schaden",
+			},
+		},
+	}
 }
 
 // Systeminfiltrator is the Rogue hero of the Codera battle.
-// All HP mutations are protected by an internal mutex for thread safety.
+// All HP mutations are protected by an internal mutex so the hero can safely
+// participate in concurrent combat scenarios.
 type Systeminfiltrator struct {
 	mu                    sync.Mutex
 	name                  string
 	maxHP                 int
 	currentHP             int
 	stats                 internal.Stats
+	skills                []internal.Skill
 	debuffActive          bool
 	debuffRoundsRemaining int
 }
 
-// Ensure Systeminfiltrator implements the Combatant interface at compile time.
-var _ internal.Combatant = (*Systeminfiltrator)(nil)
+// Ensure Systeminfiltrator satisfies the full contract at compile time.
+var _ internal.HeroController = (*Systeminfiltrator)(nil)
 
-// New creates and returns a fully initialised Systeminfiltrator.
-// Equipment bonuses from Gear are applied to the base stats automatically.
-// The name parameter must be the learner's real name (required for seed data).
-func New(name string) *Systeminfiltrator {
-	maxHP := 120
-	attack := 30
-	defense := 10
-	speed := 20
-
-	for _, e := range Gear {
+// New builds a System-Infiltrator from a DB-sourced loadout. Equipment bonuses
+// are folded into the effective stats here.
+func New(l internal.Loadout) *Systeminfiltrator {
+	stats := l.BaseStats
+	maxHP := stats.MaxHP
+	for _, e := range l.Equipment {
 		maxHP += e.HPBonus
-		attack += e.AttackBonus
-		defense += e.DefenseBonus
-		speed += e.SpeedBonus
+		stats.Attack += e.AttackBonus
+		stats.Defense += e.DefenseBonus
+		stats.Speed += e.SpeedBonus
 	}
+	stats.MaxHP = maxHP
 
 	return &Systeminfiltrator{
-		name:      name,
+		name:      l.Name,
 		maxHP:     maxHP,
 		currentHP: maxHP,
-		stats: internal.Stats{
-			MaxHP:   maxHP,
-			Attack:  attack,
-			Defense: defense,
-			Speed:   speed,
-		},
+		stats:     stats,
+		skills:    l.Skills,
 	}
 }
 
-// GetName returns the name of the hero.
-func (r *Systeminfiltrator) GetName() string {
-	return r.name
-}
+// --- internal.Combatant ---------------------------------------------------
 
-// GetStats returns the combat stats of the hero, including all equipment bonuses.
-func (r *Systeminfiltrator) GetStats() internal.Stats {
-	return r.stats
-}
+// GetName returns the name of the hero.
+func (r *Systeminfiltrator) GetName() string { return r.name }
+
+// GetStats returns the combat stats of the hero, including equipment bonuses.
+func (r *Systeminfiltrator) GetStats() internal.Stats { return r.stats }
 
 // GetCurrentHP returns the hero's current hit points.
 func (r *Systeminfiltrator) GetCurrentHP() int {
@@ -175,7 +125,7 @@ func (r *Systeminfiltrator) GetCurrentHP() int {
 	return r.currentHP
 }
 
-// SetCurrentHP sets the hero's current HP, clamped to the range [0, MaxHP].
+// SetCurrentHP sets the hero's current HP, clamped to [0, MaxHP].
 func (r *Systeminfiltrator) SetCurrentHP(hp int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -190,9 +140,7 @@ func (r *Systeminfiltrator) SetCurrentHP(hp int) {
 }
 
 // GetMaxHP returns the hero's maximum hit points.
-func (r *Systeminfiltrator) GetMaxHP() int {
-	return r.maxHP
-}
+func (r *Systeminfiltrator) GetMaxHP() int { return r.maxHP }
 
 // IsAlive returns true if the hero's current HP is above zero.
 func (r *Systeminfiltrator) IsAlive() bool {
@@ -201,11 +149,104 @@ func (r *Systeminfiltrator) IsAlive() bool {
 	return r.currentHP > 0
 }
 
-// ApplyLifeSteal heals the rogue for 10 % of the damage dealt (life_steal from Schatten-Dolch).
-func (r *Systeminfiltrator) ApplyLifeSteal(damage int) {
-	if damage <= 0 {
-		return
+// --- internal.HeroController ----------------------------------------------
+
+// Skills returns the hero's abilities in display order.
+func (r *Systeminfiltrator) Skills() []internal.Skill { return r.skills }
+
+// Execute resolves the chosen skill. Life-steal and debuff are applied to the
+// hero here; damage is returned for combat to apply to the enemy.
+func (r *Systeminfiltrator) Execute(skillIndex int, ctx internal.ActionContext) internal.ActionResult {
+	if skillIndex < 0 || skillIndex >= len(r.skills) {
+		skillIndex = 0
 	}
+	skill := r.skills[skillIndex]
+
+	// Skill 1 (Schwachstelle analysieren): debuff the dragon's defense.
+	// TODO: This is a CROSS-CUTTING effect — it should lower the dragon's
+	// defense for ALL attackers, not just this hero. Once the shared BattleState
+	// exists, this must call state.DebuffDragonDefense(5, 2) instead of storing
+	// debuff state internally. For now, keep self-contained.
+	if skillIndex == 1 {
+		r.applyDebuff()
+		return internal.ActionResult{
+			ActorName:  r.name,
+			SkillName:  skill.Name,
+			TargetName: enemyName(ctx),
+		}
+	}
+
+	// Skill 0 (Hinterhalt) and Skill 2 (Tödliche Präzision) are damage skills.
+	effectiveAttack := r.GetEffectiveAttack()
+	dmg, crit, miss := ctx.Calc(skill.DamageMin, skill.DamageMax, effectiveAttack, ctx.EnemyDefense, skill.Accuracy)
+
+	// Skill 2 (Tödliche Präzision): double damage when dragon < 25% HP.
+	if skillIndex == 2 && !miss && ctx.Enemy != nil && ctx.Enemy.IsAlive() {
+		dragonHP := ctx.Enemy.GetCurrentHP()
+		dragonMaxHP := ctx.Enemy.GetMaxHP()
+		if dragonMaxHP > 0 && float64(dragonHP)/float64(dragonMaxHP) <= 0.25 {
+			dmg *= 2
+		}
+	}
+
+	// Life-steal from Schatten-Dolch: heal self for 10% of damage dealt.
+	if skillIndex == 0 && !miss {
+		r.applyLifeSteal(dmg)
+	}
+
+	return internal.ActionResult{
+		ActorName:  r.name,
+		SkillName:  skill.Name,
+		TargetName: enemyName(ctx),
+		Damage:     dmg,
+		IsCrit:     crit,
+		IsMiss:     miss,
+	}
+}
+
+// AutoAction picks and resolves a skill automatically. Opens with the armor
+// shred if no debuff is active, uses Tödliche Präzision against a weakened
+// dragon, and defaults to Hinterhalt.
+func (r *Systeminfiltrator) AutoAction(ctx internal.ActionContext) internal.ActionResult {
+	// Open with Schwachstelle while no debuff is active.
+	if !r.hasDebuffApplied() {
+		return r.Execute(1, ctx)
+	}
+	// When dragon < 25% HP, use Tödliche Präzision.
+	if ctx.Enemy != nil && ctx.Enemy.IsAlive() {
+		dragonHP := ctx.Enemy.GetCurrentHP()
+		dragonMaxHP := ctx.Enemy.GetMaxHP()
+		if dragonMaxHP > 0 && float64(dragonHP)/float64(dragonMaxHP) <= 0.25 {
+			return r.Execute(2, ctx)
+		}
+	}
+	// Default: Hinterhalt.
+	return r.Execute(0, ctx)
+}
+
+// EndRound clears the temporary debuff state if the duration has expired.
+func (r *Systeminfiltrator) EndRound() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.debuffActive {
+		r.debuffRoundsRemaining--
+		if r.debuffRoundsRemaining <= 0 {
+			r.debuffActive = false
+		}
+	}
+}
+
+// --- role-specific mechanics ----------------------------------------------
+
+// GetEffectiveAttack returns attack including any active temporary bonus.
+func (r *Systeminfiltrator) GetEffectiveAttack() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.stats.Attack
+}
+
+// applyLifeSteal heals the rogue for 10% of the damage dealt (Schatten-Dolch).
+func (r *Systeminfiltrator) applyLifeSteal(damage int) {
 	heal := damage / 10
 	if heal < 1 {
 		heal = 1
@@ -219,8 +260,10 @@ func (r *Systeminfiltrator) ApplyLifeSteal(damage int) {
 	fmt.Printf("%s life-stealt %d HP durch den Schatten-Dolch!\n", r.name, heal)
 }
 
-// ApplyDebuff marks the dragon as debuffed (Defense -5) for 2 rounds.
-func (r *Systeminfiltrator) ApplyDebuff() {
+// applyDebuff marks the dragon as debuffed (Defense -5) for 2 rounds.
+// TODO: Replace with BattleState.DebuffDragonDefense once the shared
+// battle-state is wired by the combat loop.
+func (r *Systeminfiltrator) applyDebuff() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.debuffActive = true
@@ -228,40 +271,17 @@ func (r *Systeminfiltrator) ApplyDebuff() {
 	fmt.Printf("%s analysiert die Schwachstelle des Drachens! Defense -5 für 2 Runden.\n", r.name)
 }
 
-// HasDebuffApplied returns true when the defense debuff is currently active.
-func (r *Systeminfiltrator) HasDebuffApplied() bool {
+// hasDebuffApplied returns true when the defense debuff is currently active.
+func (r *Systeminfiltrator) hasDebuffApplied() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.debuffActive
 }
 
-// GetReducedDefense returns the dragon's defense reduced by 5 if the debuff is active.
-func (r *Systeminfiltrator) GetReducedDefense(baseDef int) int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.debuffActive {
-		reduced := baseDef - 5
-		if reduced < 1 {
-			reduced = 1
-		}
-		return reduced
+// enemyName is nil-safe so Execute can be unit-tested without a real enemy.
+func enemyName(ctx internal.ActionContext) string {
+	if ctx.Enemy == nil {
+		return "Entropie-Drache"
 	}
-	return baseDef
-}
-
-// TickDebuff decrements the debuff duration. Call this at the end of each round.
-func (r *Systeminfiltrator) TickDebuff() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.debuffActive {
-		r.debuffRoundsRemaining--
-		if r.debuffRoundsRemaining <= 0 {
-			r.debuffActive = false
-		}
-	}
-}
-
-// ShouldUseDoubleDamage returns true when the dragon's HP is at or below 25 %.
-func (r *Systeminfiltrator) ShouldUseDoubleDamage(dragonHPPct float64) bool {
-	return dragonHPPct <= 0.25
+	return ctx.Enemy.GetName()
 }
