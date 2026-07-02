@@ -6,11 +6,12 @@ import (
 
 	"github.com/codera/battle/combat"
 	"github.com/codera/battle/dragon"
-	"github.com/codera/battle/internal"
+	"github.com/codera/battle/hero/arkan-dokumentar"
 	"github.com/codera/battle/hero/funktionskrieger"
 	"github.com/codera/battle/hero/kleriker"
 	"github.com/codera/battle/hero/rogue"
 	"github.com/codera/battle/hero/schmied"
+	"github.com/codera/battle/internal"
 )
 
 func main() {
@@ -45,7 +46,7 @@ func main() {
 
 func placeholderHeroes() []internal.Combatant {
 	return []internal.Combatant{
-		placeholderHero("<DEIN_NAME> (Arkan-Dokumentar*in)", 120, 18, 8, 14),
+		arkandokumentar.New("Roda Ikwueto"),
 		placeholderHero("<DEIN_NAME> (Daten-Druide)", 100, 14, 10, 16),
 		kleriker.New("Tim Meier"),
 		funktionskrieger.New("Onni Johansson"),
