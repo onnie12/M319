@@ -3,6 +3,7 @@ package combat
 import (
 	"bufio"
 	"fmt"
+	"log/slog"
 	"math/rand"
 	"os"
 	"sort"
@@ -63,15 +64,19 @@ func CombatLoop(heroes []internal.HeroController, entropyDragon *dragon.EntropyD
 	for {
 		if !entropyDragon.IsAlive() {
 			fmt.Println("\n🎉 Der Entropie-Drache wurde besiegt! Codera ist gerettet!")
+			slog.Info("battle_end", "outcome", "heroes_win", "rounds", round-1)
 			printBattleResult(heroes)
 			return
 		}
 		if !anyAlive(heroes) {
 			fmt.Println("\n💀 Alle Helden sind gefallen. Der Entropie-Drache hat gesiegt...")
+			slog.Info("battle_end", "outcome", "dragon_win", "rounds", round-1)
 			return
 		}
 
-		fmt.Printf("\n═══════════ Runde %d ═══════════\n", round)
+		currentRound := round
+		fmt.Printf("\n═══════════ Runde %d ═══════════\n", currentRound)
+		slog.Info("round_start", "round", currentRound)
 		round++
 
 		for _, p := range participants {
@@ -85,7 +90,7 @@ func CombatLoop(heroes []internal.HeroController, entropyDragon *dragon.EntropyD
 			} else {
 				result = processHeroTurn(p.Hero, heroes, entropyDragon, reader)
 			}
-			_ = result // TODO: structured logging (slog) — see logging task
+			logAction(currentRound, result)
 
 			// Stop the round early once a side is wiped out.
 			if !entropyDragon.IsAlive() || !anyAlive(heroes) {
@@ -291,6 +296,22 @@ func printActionResult(res internal.ActionResult) {
 	default:
 		fmt.Printf("  %s setzt %s ein.\n", res.ActorName, res.SkillName)
 	}
+}
+
+// logAction records one resolved action to the structured log (separate from
+// the on-screen CLI output).
+func logAction(round int, res internal.ActionResult) {
+	slog.Info("action",
+		"round", round,
+		"actor", res.ActorName,
+		"skill", res.SkillName,
+		"target", res.TargetName,
+		"damage", res.Damage,
+		"healing", res.Healing,
+		"crit", res.IsCrit,
+		"miss", res.IsMiss,
+		"aoe", res.IsAOE,
+	)
 }
 
 func critSuffix(isCrit bool) string {

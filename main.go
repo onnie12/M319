@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 
 	"github.com/codera/battle/combat"
@@ -13,10 +14,18 @@ import (
 	"github.com/codera/battle/hero/rogue"
 	"github.com/codera/battle/hero/schmied"
 	"github.com/codera/battle/internal"
+	"github.com/codera/battle/logging"
+	"github.com/joho/godotenv"
 )
 
 func main() {
-	// TODO (Code-Kleriker*in): .env laden + Logging (slog) initialisieren.
+	// Load .env (best effort — env vars may already be set) and start logging.
+	_ = godotenv.Load()
+	if err := logging.Init(); err != nil {
+		fmt.Fprintf(os.Stderr, "Logging konnte nicht initialisiert werden: %v\n", err)
+	}
+	slog.Info("game_start")
+
 	// TODO (Runenschmied*in / Daten-Druide): DB verbinden, migrieren, seeden,
 	//   dann `helden := loadHeroesFromDB(database)` statt buildParty() nutzen.
 	helden := buildParty()
