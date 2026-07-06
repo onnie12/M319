@@ -1,187 +1,131 @@
 // Package funktionskrieger implements the Funktions-Krieger (Warrior) hero
 // for the Codera battle against the Entropy Dragon.
+//
+// This package is the REFERENCE for how every hero conforms to
+// internal.HeroController. The pattern each role should copy:
+//
+//   - DefaultLoadout(name) returns the canonical seed data for this role
+//     (base stats + equipment + skills). This is exactly what the DB seed
+//     inserts and what loadHeroesFromDB reconstructs.
+//   - New(internal.Loadout) builds the hero from DB-sourced data.
+//   - Skills / Execute / AutoAction / EndRound satisfy the contract so combat
+//     can drive the hero without importing this package.
+//
+// The role owner edits ONLY this file — no other hero package, and not combat.
 package funktionskrieger
 
 import (
-	"fmt"
 	"sync"
 
 	"github.com/codera/battle/internal"
 )
 
-// EquipmentType defines the slot an equipment item occupies.
-type EquipmentType string
-
+// Base stats of the Funktions-Krieger before equipment bonuses.
 const (
-	// Weapon represents a weapon slot.
-	Weapon EquipmentType = "weapon"
-	// Armor represents an armor slot.
-	Armor EquipmentType = "armor"
-	// Accessory represents an accessory slot.
-	Accessory EquipmentType = "accessory"
+	baseMaxHP   = 150
+	baseAttack  = 22
+	baseDefense = 14
+	baseSpeed   = 8
 )
 
-// TargetType defines who a skill can target.
-type TargetType string
-
-const (
-	// SingleEnemy targets a single enemy.
-	SingleEnemy TargetType = "single_enemy"
-	// Self targets the hero themselves.
-	Self TargetType = "self"
-)
-
-// Equipment represents a piece of gear that provides stat bonuses to the hero.
-type Equipment struct {
-	// Name is the display name of the equipment.
-	Name string
-	// Type is the slot this equipment occupies (weapon, armor, accessory).
-	Type EquipmentType
-	// AttackBonus is added to the hero's Attack stat.
-	AttackBonus int
-	// DefenseBonus is added to the hero's Defense stat.
-	DefenseBonus int
-	// SpeedBonus is added to the hero's Speed stat.
-	SpeedBonus int
-	// HPBonus is added to the hero's MaxHP.
-	HPBonus int
-	// SpecialEffect describes any passive effect (empty string if none).
-	SpecialEffect string
+// DefaultLoadout returns the canonical Funktions-Krieger loadout for the given
+// learner name. The combat game receives this from the database at runtime;
+// this function is the single source of truth the DB seed mirrors.
+func DefaultLoadout(name string) internal.Loadout {
+	return internal.Loadout{
+		Name: name,
+		Role: "krieger",
+		BaseStats: internal.Stats{
+			MaxHP:   baseMaxHP,
+			Attack:  baseAttack,
+			Defense: baseDefense,
+			Speed:   baseSpeed,
+		},
+		Equipment: []internal.Equipment{
+			{Name: "Funktions-Schwert", Type: "weapon", AttackBonus: 10},
+			{Name: "Krieger-Rüstung", Type: "armor", DefenseBonus: 8},
+			{Name: "Gurt der Ausdauer", Type: "accessory", SpeedBonus: 2, HPBonus: 40},
+		},
+		Skills: []internal.Skill{
+			{
+				Name:        "Präziser Hieb",
+				DamageMin:   18,
+				DamageMax:   32,
+				Accuracy:    0.80,
+				Target:      internal.SingleEnemy,
+				Description: "Doppelschlag: zwei parallele Hiebe (Goroutines)",
+			},
+			{
+				Name:        "Schutzschild",
+				Accuracy:    1.0,
+				Target:      internal.Self,
+				Description: "Erhöht eigene Defense um 5 für diese Runde",
+			},
+			{
+				Name:        "Kampfschrei",
+				DamageMin:   8,
+				DamageMax:   16,
+				Accuracy:    0.90,
+				Target:      internal.SingleEnemy,
+				Description: "Schwächerer Angriff, +5 Attack nächste Runde",
+			},
+		},
+	}
 }
 
-// Skill represents a combat ability of the Funktions-Krieger.
-type Skill struct {
-	// Name is the display name of the skill.
-	Name string
-	// DamageMin is the minimum base damage dealt.
-	DamageMin int
-	// DamageMax is the maximum base damage dealt.
-	DamageMax int
-	// Healing is the amount healed (0 if the skill deals damage).
-	Healing int
-	// Accuracy is the hit chance between 0.0 and 1.0.
-	Accuracy float64
-	// TargetType defines who the skill can target.
-	TargetType TargetType
-	// Description briefly explains the skill's effect.
-	Description string
-}
-
-// Gear holds the three equipment items worn by the Funktions-Krieger.
-// Bonuses from all three pieces are applied automatically in New().
-var Gear = [3]Equipment{
-	{
-		Name:        "Funktions-Schwert",
-		Type:        Weapon,
-		AttackBonus: 10,
-	},
-	{
-		Name:         "Krieger-Rüstung",
-		Type:         Armor,
-		DefenseBonus: 8,
-	},
-	{
-		Name:       "Gurt der Ausdauer",
-		Type:       Accessory,
-		SpeedBonus: 2,
-		HPBonus:    40,
-	},
-}
-
-// Skills holds all three combat abilities of the Funktions-Krieger.
-var Skills = [3]Skill{
-	{
-		Name:        "Präziser Hieb",
-		DamageMin:   18,
-		DamageMax:   32,
-		Accuracy:    0.80,
-		TargetType:  SingleEnemy,
-		Description: "Kräftiger physischer Angriff",
-	},
-	{
-		Name:        "Schutzschild",
-		Accuracy:    1.0,
-		TargetType:  Self,
-		Description: "Erhöht eigene Defense um 5 für diese Runde",
-	},
-	{
-		Name:        "Kampfschrei",
-		DamageMin:   8,
-		DamageMax:   16,
-		Accuracy:    0.90,
-		TargetType:  SingleEnemy,
-		Description: "Schwächerer Angriff, +5 Attack nächste Runde",
-	},
-}
-
-// DamageCalcFn matches the signature of combat.CalculateDamage.
-// It is passed in from the combat package to avoid a circular import.
-type DamageCalcFn func(baseMin, baseMax, attackerStat, defenderDef int, accuracy float64) (int, bool, bool)
-
-// StrikeResult holds the outcome of a single strike.
+// StrikeResult holds the outcome of a single strike within a Double Strike.
 type StrikeResult struct {
-	// Damage is the final damage dealt (0 if the strike missed).
 	Damage int
-	// IsCrit is true when the strike was a critical hit.
 	IsCrit bool
-	// IsMiss is true when the strike missed the target.
 	IsMiss bool
 }
 
 // Funktionskrieger is the Warrior hero of the Codera battle.
-// All HP mutations are protected by an internal mutex so that the hero
-// can safely participate in concurrent combat scenarios.
+// All HP mutations are protected by an internal mutex so the hero can safely
+// participate in concurrent combat scenarios.
 type Funktionskrieger struct {
 	mu           sync.Mutex
 	name         string
 	maxHP        int
 	currentHP    int
 	stats        internal.Stats
+	skills       []internal.Skill
 	defenseBonus int // temporary bonus from Schutzschild, reset each round
 	attackBonus  int // temporary bonus from Kampfschrei, reset each round
 }
 
-// Ensure Funktionskrieger implements the Combatant interface at compile time.
-var _ internal.Combatant = (*Funktionskrieger)(nil)
+// Ensure Funktionskrieger satisfies the full contract at compile time.
+var _ internal.HeroController = (*Funktionskrieger)(nil)
 
-// New creates and returns a fully initialised Funktionskrieger.
-// Equipment bonuses from Gear are applied to the base stats automatically.
-// The name parameter must be the learner's real name (required for seed data).
-func New(name string) *Funktionskrieger {
-	maxHP := 150
-	attack := 22
-	defense := 14
-	speed := 8
-
-	for _, e := range Gear {
+// New builds a Funktions-Krieger from a DB-sourced loadout. Equipment bonuses
+// are folded into the effective stats here.
+func New(l internal.Loadout) *Funktionskrieger {
+	stats := l.BaseStats
+	maxHP := stats.MaxHP
+	for _, e := range l.Equipment {
 		maxHP += e.HPBonus
-		attack += e.AttackBonus
-		defense += e.DefenseBonus
-		speed += e.SpeedBonus
+		stats.Attack += e.AttackBonus
+		stats.Defense += e.DefenseBonus
+		stats.Speed += e.SpeedBonus
 	}
+	stats.MaxHP = maxHP
 
 	return &Funktionskrieger{
-		name:      name,
+		name:      l.Name,
 		maxHP:     maxHP,
 		currentHP: maxHP,
-		stats: internal.Stats{
-			MaxHP:   maxHP,
-			Attack:  attack,
-			Defense: defense,
-			Speed:   speed,
-		},
+		stats:     stats,
+		skills:    l.Skills,
 	}
 }
 
-// GetName returns the name of the hero.
-func (f *Funktionskrieger) GetName() string {
-	return f.name
-}
+// --- internal.Combatant ---------------------------------------------------
 
-// GetStats returns the combat stats of the hero, including all equipment bonuses.
-func (f *Funktionskrieger) GetStats() internal.Stats {
-	return f.stats
-}
+// GetName returns the name of the hero.
+func (f *Funktionskrieger) GetName() string { return f.name }
+
+// GetStats returns the combat stats of the hero, including equipment bonuses.
+func (f *Funktionskrieger) GetStats() internal.Stats { return f.stats }
 
 // GetCurrentHP returns the hero's current hit points.
 func (f *Funktionskrieger) GetCurrentHP() int {
@@ -190,7 +134,7 @@ func (f *Funktionskrieger) GetCurrentHP() int {
 	return f.currentHP
 }
 
-// SetCurrentHP sets the hero's current HP, clamped to the range [0, MaxHP].
+// SetCurrentHP sets the hero's current HP, clamped to [0, MaxHP].
 func (f *Funktionskrieger) SetCurrentHP(hp int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -205,9 +149,7 @@ func (f *Funktionskrieger) SetCurrentHP(hp int) {
 }
 
 // GetMaxHP returns the hero's maximum hit points.
-func (f *Funktionskrieger) GetMaxHP() int {
-	return f.maxHP
-}
+func (f *Funktionskrieger) GetMaxHP() int { return f.maxHP }
 
 // IsAlive returns true if the hero's current HP is above zero.
 func (f *Funktionskrieger) IsAlive() bool {
@@ -216,95 +158,143 @@ func (f *Funktionskrieger) IsAlive() bool {
 	return f.currentHP > 0
 }
 
-// GetEffectiveAttack returns the current attack value including any active temporary bonuses.
-func (f *Funktionskrieger) GetEffectiveAttack() int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.stats.Attack + f.attackBonus
+// --- internal.HeroController ----------------------------------------------
+
+// Skills returns the hero's abilities in display order.
+func (f *Funktionskrieger) Skills() []internal.Skill { return f.skills }
+
+// Execute resolves the chosen skill. Self-buffs are applied to the hero here;
+// damage and healing are returned for combat to apply to the enemy/allies.
+func (f *Funktionskrieger) Execute(skillIndex int, ctx internal.ActionContext) internal.ActionResult {
+	if skillIndex < 0 || skillIndex >= len(f.skills) {
+		skillIndex = 0
+	}
+	skill := f.skills[skillIndex]
+
+	// Self-target: Schutzschild raises defense for this round.
+	if skill.Target == internal.Self {
+		f.applyDefenseBuff(5)
+		return internal.ActionResult{
+			ActorName:  f.name,
+			SkillName:  skill.Name,
+			TargetName: f.name,
+		}
+	}
+
+	// Skill 0 (Präziser Hieb) is the Krieger's signature Double Strike:
+	// two hits resolved in parallel via goroutines.
+	if skillIndex == 0 {
+		strikes := f.DoubleStrike(ctx.EnemyDefense, ctx.Calc)
+		total, crit := 0, false
+		for _, s := range strikes {
+			if !s.IsMiss {
+				total += s.Damage
+				crit = crit || s.IsCrit
+			}
+		}
+		return internal.ActionResult{
+			ActorName:  f.name,
+			SkillName:  "Doppelschlag (" + skill.Name + ")",
+			TargetName: enemyName(ctx),
+			Damage:     total,
+			IsCrit:     crit,
+			IsMiss:     total == 0,
+		}
+	}
+
+	// Kampfschrei: a lighter hit plus a +5 Attack buff for next round.
+	dmg, crit, miss := ctx.Calc(skill.DamageMin, skill.DamageMax, f.GetEffectiveAttack(), ctx.EnemyDefense, skill.Accuracy)
+	f.applyAttackBuff(5)
+	return internal.ActionResult{
+		ActorName:  f.name,
+		SkillName:  skill.Name,
+		TargetName: enemyName(ctx),
+		Damage:     dmg,
+		IsCrit:     crit,
+		IsMiss:     miss,
+	}
 }
 
-// GetEffectiveDefense returns the current defense value including any active temporary bonuses.
-func (f *Funktionskrieger) GetEffectiveDefense() int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.stats.Defense + f.defenseBonus
+// AutoAction shields when low on HP, otherwise opens with the Double Strike.
+func (f *Funktionskrieger) AutoAction(ctx internal.ActionContext) internal.ActionResult {
+	if f.shouldUseShield() {
+		for i, s := range f.skills {
+			if s.Target == internal.Self {
+				return f.Execute(i, ctx)
+			}
+		}
+	}
+	return f.Execute(0, ctx)
 }
 
-// UseSchutzschild applies a +5 Defense bonus for the current round.
-// The bonus is cleared automatically by ResetRoundBonuses at round end.
-func (f *Funktionskrieger) UseSchutzschild() {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.defenseBonus += 5
-	fmt.Printf("%s aktiviert Schutzschild! Defense +5 für diese Runde.\n", f.name)
-}
-
-// UseKampfschrei applies a +5 Attack bonus that takes effect next round.
-// The bonus is cleared automatically by ResetRoundBonuses at round end.
-func (f *Funktionskrieger) UseKampfschrei() {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.attackBonus += 5
-	fmt.Printf("%s brüllt! Attack +5 für die nächste Runde.\n", f.name)
-}
-
-// ResetRoundBonuses clears all temporary stat bonuses.
-// The combat loop must call this at the end of every round.
-func (f *Funktionskrieger) ResetRoundBonuses() {
+// EndRound clears the temporary per-round bonuses.
+func (f *Funktionskrieger) EndRound() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.defenseBonus = 0
 	f.attackBonus = 0
 }
 
-// ShouldUseShield returns true when the hero's HP is at or below 30% of MaxHP.
-// Used by the optional automatic Schutzschild AI logic in the combat loop.
-func (f *Funktionskrieger) ShouldUseShield() bool {
+// --- role-specific mechanics ----------------------------------------------
+
+// GetEffectiveAttack returns attack including any active temporary bonus.
+func (f *Funktionskrieger) GetEffectiveAttack() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.stats.Attack + f.attackBonus
+}
+
+// GetEffectiveDefense returns defense including any active temporary bonus.
+func (f *Funktionskrieger) GetEffectiveDefense() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.stats.Defense + f.defenseBonus
+}
+
+func (f *Funktionskrieger) applyDefenseBuff(n int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.defenseBonus += n
+}
+
+func (f *Funktionskrieger) applyAttackBuff(n int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.attackBonus += n
+}
+
+func (f *Funktionskrieger) shouldUseShield() bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return float64(f.currentHP)/float64(f.maxHP) <= 0.30
 }
 
-// DoubleStrike executes two simultaneous Präziser Hieb attacks using goroutines.
-//
-// Both damage calculations run in parallel. A sync.WaitGroup ensures that both
-// goroutines have finished before any result is returned to the caller.
-// The caller is responsible for applying the returned damage values to the dragon;
-// the dragon's own mutex (TakeDamage) protects its HP during those writes.
-//
-// Each goroutine writes to its own index in the results array, so no mutex
-// is needed inside DoubleStrike itself.
-func (f *Funktionskrieger) DoubleStrike(defenderDef int, calc DamageCalcFn) [2]StrikeResult {
-	skill := Skills[0] // Präziser Hieb
-	effectiveAttack := f.GetEffectiveAttack()
+// DoubleStrike resolves two Präziser-Hieb attacks concurrently. Each goroutine
+// writes its own array index (no shared write, so no mutex needed here); a
+// WaitGroup barrier guarantees both finish before returning. Combat applies the
+// summed damage to the dragon, whose own mutex protects its HP.
+func (f *Funktionskrieger) DoubleStrike(defenderDef int, calc internal.DamageFunc) [2]StrikeResult {
+	skill := f.skills[0]
+	attack := f.GetEffectiveAttack()
 
 	var results [2]StrikeResult
 	var wg sync.WaitGroup
-
 	for i := 0; i < 2; i++ {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			dmg, crit, miss := calc(skill.DamageMin, skill.DamageMax, effectiveAttack, defenderDef, skill.Accuracy)
-			// Safe: each goroutine writes to a different index.
+			dmg, crit, miss := calc(skill.DamageMin, skill.DamageMax, attack, defenderDef, skill.Accuracy)
 			results[idx] = StrikeResult{Damage: dmg, IsCrit: crit, IsMiss: miss}
 		}(i)
 	}
-
 	wg.Wait()
-
-	// Print results after both goroutines are done.
-	for i, r := range results {
-		if r.IsMiss {
-			fmt.Printf("%s – Schlag %d verfehlt!\n", f.name, i+1)
-		} else {
-			suffix := ""
-			if r.IsCrit {
-				suffix = " (KRITISCHER TREFFER!)"
-			}
-			fmt.Printf("%s – Schlag %d trifft für %d Schaden%s!\n", f.name, i+1, r.Damage, suffix)
-		}
-	}
-
 	return results
+}
+
+// enemyName is nil-safe so Execute can be unit-tested without a real enemy.
+func enemyName(ctx internal.ActionContext) string {
+	if ctx.Enemy == nil {
+		return "Entropie-Drache"
+	}
+	return ctx.Enemy.GetName()
 }
