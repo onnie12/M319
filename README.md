@@ -1,13 +1,15 @@
 # Codera Battle
 
 Rundenbasiertes Kommandozeilen-Kampfspiel in Go: Sechs Helden treten gegen den
-Endgegner «Entropie-Drache» an. Abschlussprojekt der Module **M319**
-(Applikation realisieren) und **M164** (Datenbank erstellen und Daten einfügen).
+Endgegner Entropie-Drache an. Abschlussprojekt der Module **M319**
+und **M164**.
 
 ## Voraussetzungen
 
 - Go 1.22 oder neuer
 - Docker (für die PostgreSQL-Datenbank)
+- PgAdmin zur Übersicht der SQL-Tabellen
+- Git zum Pullen des Projektes
 
 ## Setup
 
@@ -25,11 +27,12 @@ docker run -d \
   --restart unless-stopped \
   postgres:16
 ```
+- die "\" sind dazu, auf einer Linux-Maschine die Zeilen zu trennen. Auf Windows kann man einfach die Commands alle auf einer Zeile schreiben.
 
 ### 2. Konfiguration anlegen
 
 ```bash
-cp .env-example .env
+cp .env-example .env (Auf Windows copy .env-example .env)
 ```
 
 Die Werte in `.env` bei Bedarf an die eigene Datenbank anpassen (Port, Benutzer,
@@ -93,6 +96,7 @@ Bildschirmausgabe).
 | Arkan-Dokumentar | Roda Ikwueto |
 | Daten-Druide | Jonas Aeschlimann |
 | System-Infiltrator | Luca Witkowski |
-
+| Code-Kleriker | Tim Meier |
+| Runenschmied | Yves Schaufelberger |
 Die zusätzlichen Klassen Code-Kleriker und Runenschmied wurden zur
-Vervollständigung der sechs Rollen ergänzt.
+Vervollständigung der sechs Rollen ergänzt und sind keine Mitglieder der Gruppe.
