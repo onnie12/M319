@@ -1,3 +1,5 @@
+// Package combat implements the turn-based battle loop that drives heroes
+// against the Entropy Dragon.
 package combat
 
 import (

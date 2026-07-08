@@ -1,3 +1,5 @@
+// Package internal defines shared contracts (Combatant, HeroController, value
+// types) between the combat engine and the hero packages.
 package internal
 
 // This file defines the shared contract between the combat engine and the hero

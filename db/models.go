@@ -1,3 +1,5 @@
+// Package db provides GORM models, Postgres connection, seeding, and hero
+// persistence.
 package db
 
 import "gorm.io/gorm"

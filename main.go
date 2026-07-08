@@ -1,3 +1,4 @@
+// Package main is the entry point for the Codera Battle CLI game.
 package main
 
 import (
